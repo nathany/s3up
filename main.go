@@ -29,14 +29,15 @@ type file struct {
 	lastModified time.Time
 }
 
+
 var wg sync.WaitGroup
 
 func main() {
 	var (
-		accessKey, secretKey, sourcePath, regionName, bucketName string
-		numberOfWorkers                                          int
-		force                                                    bool
-		help                                                     bool
+		accessKey, secretKey, sourcePath, regionName, bucketName, accessControlList string
+		numberOfWorkers                                                             int
+		force                                                                       bool
+		help                                                                        bool
 	)
 
 	// Usage example:
@@ -47,6 +48,7 @@ func main() {
 	flag.StringVar(&regionName, "region", "us-east-1", "Name of region for AWS")
 	flag.StringVar(&bucketName, "bucket", "", "Destination bucket name on AWS")
 	flag.StringVar(&sourcePath, "source", ".", "path of files to upload")
+	flag.StringVar(&accessControlList, "acl", "public-read", "access control list to upload")
 	flag.BoolVar(&force, "force", false, "upload even if the etags match")
 	flag.IntVar(&numberOfWorkers, "workers", -1, "number of workers to upload files")
 	flag.BoolVar(&help, "h", false, "help")
@@ -111,7 +113,7 @@ func main() {
 	errs := make(chan error, 1)
 	for i := 0; i < numberOfWorkers; i++ {
 		wg.Add(1)
-		go worker(filesToUpload, b, errs)
+		go worker(filesToUpload, b, errs, s3.ACL(accessControlList))
 	}
 
 	plan(force, sourcePath, b, filesToUpload)
@@ -248,9 +250,9 @@ func cleanup(paths []string, destBucket *s3.Bucket) error {
 }
 
 // worker uploads files
-func worker(filesToUpload <-chan file, destBucket *s3.Bucket, errs chan<- error) {
+func worker(filesToUpload <-chan file, destBucket *s3.Bucket, errs chan<- error, accessControlList s3.ACL) {
 	for f := range filesToUpload {
-		err := upload(f, destBucket)
+		err := upload(f, destBucket, accessControlList)
 		if err != nil {
 			fmt.Printf("Error uploading %s: %s\n", f.path, err)
 			// if there are no errors on the channel, put this one there
@@ -264,7 +266,7 @@ func worker(filesToUpload <-chan file, destBucket *s3.Bucket, errs chan<- error)
 	wg.Done()
 }
 
-func upload(source file, destBucket *s3.Bucket) error {
+func upload(source file, destBucket *s3.Bucket, accessControlList s3.ACL) error {
 	f, err := os.Open(source.absPath)
 	if err != nil {
 		return err
@@ -276,5 +278,5 @@ func upload(source file, destBucket *s3.Bucket) error {
 		contentType = "application/octet-stream"
 	}
 
-	return destBucket.PutReader(source.path, f, source.size, contentType, "public-read")
+	return destBucket.PutReader(source.path, f, source.size, contentType, accessControlList)
 }
